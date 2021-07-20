@@ -18,8 +18,7 @@ our %SCHEMAS = (
   'https://spec.openapis.org/oas/3.0/schema/2019-04-02' => '+OpenAPIv3',
 );
 
-has formats                   => sub { require JSON::Validator::Schema; JSON::Validator::Schema->_build_formats };
-has recursive_data_protection => 1;
+has formats => sub { require JSON::Validator::Schema; JSON::Validator::Schema->_build_formats };
 
 has store => sub {
   my $self = shift;
@@ -94,8 +93,6 @@ sub _new_schema {
 
   my $store  = $self->store;
   my $schema = $loadable ? $store->get($store->load($source)) : $source;
-
-  $attrs{recursive_data_protection} //= $self->recursive_data_protection;
 
   $attrs{coerce}  ||= $self->{coerce}  if $self->{coerce};
   $attrs{formats} ||= $self->{formats} if $self->{formats};
@@ -301,23 +298,6 @@ block should return C<undef> on success and an error string on error:
   sub { return defined $_[0] && $_[0] eq "42" ? undef : "Not the answer." };
 
 See L<JSON::Validator::Formats> for a list of supported formats.
-
-=head2 recursive_data_protection
-
-  my $jv = $jv->recursive_data_protection($bool);
-  my $bool = $jv->recursive_data_protection;
-
-Recursive data protection is active by default, however it can be deactivated
-by assigning a false value to the L</recursive_data_protection> attribute.
-
-Recursive data protection can have a noticeable impact on memory usage when
-validating large data structures. If you are encountering issues with memory
-and you can guarantee that you do not have any loops in your data structure
-then deactivating the recursive data protection may help.
-
-This attribute is EXPERIMENTAL and may change in a future release.
-
-B<Disclaimer: Use at your own risk, if you have any doubt then don't use it>
 
 =head2 store
 
