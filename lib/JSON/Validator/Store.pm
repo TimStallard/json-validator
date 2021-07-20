@@ -66,14 +66,14 @@ sub resolve {
   $fragment = '' unless defined $fragment;
   $base_url ||= $curr->{base_url} || '';
 
-  warn "[JSON::Validator] Resolve curr: @{[map qq($_=$curr->{$_}), sort keys %$curr]}\n" if DEBUG;
+  warn "[JSON::Validator] Resolve curr: ref=$ref,@{[map qq($_=$curr->{$_}), sort keys %$curr]}\n" if DEBUG;
 
   my $state = {base_url => $base_url, fragment => $fragment, source => 'unknown'};
   if (defined(my $schema = $self->schemas->{$abs_url})) {
-    @$state{qw(base_url id root schema source)} = ("$abs_url", "$abs_url", $schema, $schema, 'schema/abs_url');
+    @$state{qw(base_url id root schema source)} = ($abs_url, $abs_url, $schema, $schema, 'schema/abs_url');
   }
   elsif (defined(my $root = $self->schemas->{$base_url})) {
-    @$state{qw(id root source)} = ($base_url, $root, 'schema/base_url');
+    @$state{qw(base_url id root source)} = ($base_url, $base_url, $root, 'schema/base_url');
   }
   elsif ($base_url) {
     $base_url = uri $base_url, $curr->{base_url} if $curr->{base_url};

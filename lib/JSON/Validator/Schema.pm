@@ -42,44 +42,23 @@ has _refs => sub { +{} };
 
 sub bundle {
   my $self = shift;
+  my $data = $self->data;
+  return $self->new(%$self) unless ref $data eq 'HASH';
 
-  my ($ref_lookup, $clone, @refs, %seen) = ({});
-  $clone = sub {
-    my $source = shift;
-    my $type   = ref $source;
+  local $self->{flat_ref_seen} = {};
+  my $bundle = $self->new(%$self, data => {}, _refs => {});
+  $bundle->{data} = $self->_bundle($bundle, $data);
 
-    if ($type eq 'HASH' and $source->{'$ref'} and !ref $source->{'$ref'}) {
-      my ($base_url, $fragment) = split '#', $source->{'$ref'};
-      $seen{$fragment} = $fragment;
-      my $clone = {%$source};
-      push @refs, [$clone, $source] if $base_url;
-      return $clone;
-    }
-
-    return {map { ($_ => $clone->($source->{$_})) } keys %$source} if $type eq 'HASH';
-    return [map { $clone->($_) } @$source]                         if $type eq 'ARRAY';
-    return $source;
-  };
-
-  my $bundle = $clone->($self->data);
-
-  while (my $ref = shift @refs) {
-    my $uri = $ref->[0]{'$ref'};
-    unless ($seen{$uri}) {
-      my @path = $self->_bundle_ref_path($uri, \%seen);
-      $seen{$uri} = join '/', '#', @path;
-
-      my ($leaf, $insert_at) = (pop @path, $bundle);
-      $insert_at = $insert_at->{shift @path} //= {} while @path;
-      my $state = $self->_state({}, schema => $ref->[1]);
-      $insert_at->{$leaf} = $state->{schema};
-      $ref_lookup->{$insert_at->{$leaf}} = $state;
-    }
-
-    $ref->[0]{'$ref'} = $seen{$uri};
+  # Add definitions back to schema
+  for my $state (values %{$bundle->_refs}) {
+    my $path = delete $state->{ref_path};
+    my $leaf = pop @$path;
+    my $node = $bundle->{data};
+    $node = $node->{shift(@$path)} //= {} while @$path;
+    $node->{$leaf} = $state->{schema};
   }
 
-  return $self->new(%$self, data => $bundle, _refs => $ref_lookup);
+  return $bundle;
 }
 
 sub contains {
@@ -204,17 +183,47 @@ sub _build_formats {
   };
 }
 
-sub _bundle_ref_path { ('definitions', shift->_flat_ref_name(@_)) }
+sub _bundle {
+  my ($self, $bundle, $schema) = @_;
+  my $type = ref $schema;
+
+  return [map { $self->_bundle($bundle, $_) } @$schema] if $type eq 'ARRAY';
+  return $schema                                        if $type ne 'HASH';
+
+  my ($found, $state, %seen) = ($schema);
+  while (ref $found eq 'HASH' and $found->{'$ref'} and !ref $found->{'$ref'}) {
+    last if $seen{$found}++;
+    $state = $self->_refs->{$found}
+      // Carp::confess(qq(resolve() must be called before bundle() to lookup "$found->{'$ref'}".));
+    $found = $state->{schema};
+  }
+
+  my $clone = {};
+  for my $k (keys %$schema) {
+    if ($k eq '$ref' and $state) {
+      my @path = $self->_bundle_ref_path($schema->{'$ref'}, {});
+      $clone->{$k}             = join '/', '#', @path;
+      $bundle->_refs->{$clone} = {%$state, ref_path => \@path};
+    }
+    else {
+      $clone->{$k} = $self->_bundle($bundle, $schema->{$k});
+    }
+  }
+
+  return $clone;
+}
+
+sub _bundle_ref_path { ('definitions', shift->_flat_ref_name(@_) =~ s!^definitions_!!r) }
 
 sub _flat_ref_name {
-  my ($self, $ref, $seen) = @_;
+  my ($self, $ref) = @_;
   my $uri = uri $ref;
 
   my $l = 0;
   while (1) {
-    my $flat = join '-', map { s!^\W+!!; s!\W!_!g; $_ } grep { defined $_ } pop @{$uri->path}, $uri->fragment,
+    my $flat = join '-', map { s!^\W+!!; s![^\w-]!_!g; $_ } grep { length $_ } pop @{$uri->path}, $uri->fragment,
       $l++ ? substr data_checksum($ref), 0, $l : undef;
-    return $flat if !$seen->{$flat} or $l >= 32;
+    return $flat if !$self->{flat_ref_seen}{$flat} or $l >= 32;
   }
 }
 
@@ -268,7 +277,7 @@ sub _resolve_object {
   if ($schema->{id} and !ref $schema->{id}) {
     my $id = uri $schema->{id}, $state->{base_url};
     $self->store->add($id => $schema);
-    $state = {%$state, base_url => $id->fragment(undef)};
+    $state = {%$state, base_url => $id->fragment(undef), id => $id};
   }
 
   if ($found->{'$ref'} = $schema->{'$ref'} && !ref $schema->{'$ref'}) {
@@ -285,7 +294,7 @@ sub _state {
   while (ref $schema eq 'HASH' and $schema->{'$ref'} and !ref $schema->{'$ref'}) {
     last if $seen{$schema}++;
     $schema = $self->_refs->{$schema}{schema}
-      // Carp::confess(qq(You have to call resolve() before validate() to lookup "$schema->{'$ref'}".));
+      // Carp::confess(qq(resolve() must be called before validate() to lookup "$schema->{'$ref'}".));
   }
 
   return {%$curr, %override, schema => $schema};

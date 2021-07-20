@@ -32,7 +32,7 @@ for my $method (qw(cache_paths ua)) {
   Mojo::Util::monkey_patch(__PACKAGE__, $method => sub { shift->store->$method(@_) });
 }
 
-sub bundle { shift->schema->bundle(@_) }
+sub bundle { shift->schema->bundle(@_)->data }
 
 sub coerce {
   my $self = shift;
